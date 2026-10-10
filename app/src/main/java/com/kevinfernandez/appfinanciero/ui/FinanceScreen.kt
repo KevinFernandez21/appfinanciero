@@ -65,7 +65,15 @@ fun FinanceScreen(viewModel: FinanceViewModel, documentPickers: DocumentPickerAc
                 val current = snapshot!!
                 Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     when (page) {
-                        0 -> Dashboard(current, !busy, onSetUp = { form = "Account" })
+                        0 -> {
+                            Dashboard(current, !busy, onSetUp = { form = "Account" })
+                            if (current.accounts.isNotEmpty()) WeeklyReviewPanel(current, busy, error,
+                                onClearError = viewModel::clearError,
+                                onSave = { summary, note, onSuccess ->
+                                    viewModel.save({ saveWeeklyReview(UUID.randomUUID().toString(), summary.start, summary.end,
+                                        summary.cashFlow.income.currency, note) }, onSuccess)
+                                })
+                        }
                         1 -> {
                             Button(onClick = { form = "Account" }, enabled = !busy) { Text("Add account") }
                             if (current.accounts.isEmpty()) Text("Start with a cash or bank account and its opening balance.")
@@ -216,9 +224,9 @@ private fun Dashboard(snapshot: FinanceSnapshot, enabled: Boolean, onSetUp: () -
     snapshot.accounts.map { it.currency }.distinct().forEach { currency ->
         val flow = ledger.cashFlow(currency, today.withDayOfMonth(1), today)
         RecordCard("Total balance", ledger.totalBalance(currency).display())
-        RecordCard("This month · $currency", "Income: ${flow.income.display()}\nExpenses: ${flow.expenses.display()}\nNet: ${flow.net.display()}")
+        RecordCard("Month to date · $currency", "${today.withDayOfMonth(1)} to $today (inclusive)\nIncome: ${flow.income.display()}\nExpenses: ${flow.expenses.display()}\nNet: ${flow.net.display()}")
         val insight = FinancialCoach().summarize(ledger, snapshot.planner(), snapshot.budgets.map { it.toDomain() }, currency, YearMonth.from(today))
-        RecordCard("Computed insight · no AI", "Calendar-month net: ${insight.netCashFlow.display()}\nOver-budget plans: ${insight.budgets.count { it.isExceeded }}\nSavings goals: ${insight.goals.size}")
+        RecordCard("Computed insight · no AI", "${today.withDayOfMonth(1)} to ${today.withDayOfMonth(today.lengthOfMonth())} (inclusive)\nFull calendar-month net: ${insight.netCashFlow.display()}\nOver-budget plans: ${insight.budgets.count { it.isExceeded }}\nSavings goals: ${insight.goals.size}")
     }
     Text("Internal transfers are excluded from income and expenses.")
 }

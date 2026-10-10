@@ -11,13 +11,14 @@ Under active development. User-selected exports are password-encrypted by defaul
 - Record accounts, income, expenses, and internal transfers.
 - See balances and cash flow without counting transfers as earnings or spending.
 - Set category budgets and savings goals; reserve existing funds without creating fake transactions.
+- Understand recorded income and spending with an optional, non-AI weekly review.
 - Learn from clear explanations of calculations and optional, explicitly confirmed AI drafts.
 
 ## Technology
 
 Single-device Android app: Compose UI, Kotlin domain rules, Room database, DataStore preferences. No remote backend is required for a single-user offline ledger. Optional on-device speech/LLM and an authenticated PC companion are separate adapters; neither owns financial state.
 
-See [architecture](docs/ARCHITECTURE.md), [delivery plan](docs/ROADMAP.md), [first-run usage](docs/USAGE.md), [backup safety](docs/BACKUP.md), [app lock](docs/LOCK.md), [optional local AI](docs/AI.md), and the [PC/MCP boundary](docs/PC_COMPANION.md).
+See [architecture](docs/ARCHITECTURE.md), [delivery plan](docs/ROADMAP.md), [first-run usage](docs/USAGE.md), [weekly review](docs/REVIEW.md), [backup safety](docs/BACKUP.md), [app lock](docs/LOCK.md), [optional local AI](docs/AI.md), and the [PC/MCP boundary](docs/PC_COMPANION.md).
 
 ## Build
 

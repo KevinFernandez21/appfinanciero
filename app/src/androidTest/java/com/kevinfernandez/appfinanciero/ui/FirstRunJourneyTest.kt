@@ -70,7 +70,7 @@ class FirstRunJourneyTest {
         compose.activityRule.scenario.recreate()
         awaitText("Total balance")
         compose.onNodeWithText("JPY 1150").assertIsDisplayed()
-        compose.onNodeWithText("Income: JPY 200\nExpenses: JPY 50\nNet: JPY 150").assertIsDisplayed()
+        compose.onNodeWithText("Income: JPY 200\nExpenses: JPY 50\nNet: JPY 150", substring = true).assertIsDisplayed()
     }
 
     private fun movement(type: String, amount: String) {
