@@ -11,6 +11,7 @@ import com.kevinfernandez.appfinanciero.domain.SavingsGoal
 import com.kevinfernandez.appfinanciero.domain.Transaction
 import com.kevinfernandez.appfinanciero.domain.TransactionType
 import java.time.LocalDate
+import java.util.UUID
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -23,8 +24,28 @@ data class FinanceSnapshot(
     val categories: List<CategoryEntity> = emptyList(),
     val budgets: List<BudgetEntity> = emptyList(),
     val weeklyReviews: List<WeeklyReviewEntity> = emptyList(),
+    val corrections: List<TransactionCorrectionEntity> = emptyList(),
 ) {
-    fun ledger(): FinanceLedger = FinanceLedger(accounts.map { it.toDomain() }, transactions.map { it.toDomain() })
+    fun ledger(): FinanceLedger {
+        val domainAccounts = accounts.map { it.toDomain() }
+        val rawTransactions = transactions.map { it.toDomain() }
+        // Validate all recorded rows, including ones excluded from current calculations.
+        FinanceLedger(domainAccounts, rawTransactions)
+        val transactionIds = rawTransactions.map { it.id }.toSet()
+        val correctedIds = corrections.map { it.originalTransactionId }.toSet()
+        require(corrections.map { it.id }.toSet().size == corrections.size) { "Duplicate correction identifier" }
+        require(correctedIds.size == corrections.size) { "Transaction was already corrected" }
+        corrections.forEach {
+            require(it.id.isNotBlank() && it.reason.isNotBlank()) { "Correction identifier and reason are required" }
+            require(it.originalTransactionId in transactionIds) { "Unknown original transaction" }
+            require(it.replacementTransactionId == null || it.replacementTransactionId in transactionIds) { "Unknown replacement transaction" }
+            require(it.replacementTransactionId == null || it.replacementTransactionId !in correctedIds) {
+                "Correction chains and cycles are not supported"
+            }
+            LocalDate.ofEpochDay(it.dateEpochDay)
+        }
+        return FinanceLedger(domainAccounts, rawTransactions.filterNot { it.id in correctedIds })
+    }
     fun planner(): GoalPlanner {
         val ledger = ledger()
         val domainGoals = goals.map { it.toDomain() }
@@ -57,7 +78,7 @@ fun BudgetEntity.toDomain() = CategoryBudget(id, categoryId, Money(limitMinor, c
 class RoomFinanceRepository(private val database: FinanceDatabase) {
     private val dao = database.financeDao()
     fun observeSnapshot(): Flow<FinanceSnapshot> = database.invalidationTracker.createFlow(
-        "accounts", "transactions", "goals", "goal_reservations", "categories", "budgets", "weekly_reviews",
+        "accounts", "transactions", "goals", "goal_reservations", "categories", "budgets", "weekly_reviews", "transaction_corrections",
         emitInitialState = true,
     ).map { dao.getSnapshot() }
 
@@ -65,7 +86,7 @@ class RoomFinanceRepository(private val database: FinanceDatabase) {
 
     suspend fun addAccount(account: Account) = database.withTransaction {
         val current = dao.getSnapshot()
-        val ledger = FinanceLedger(current.accounts.map { it.toDomain() } + account, current.transactions.map { it.toDomain() })
+        val ledger = FinanceLedger(current.accounts.map { it.toDomain() } + account, current.ledger().transactions)
         ledger.totalBalance(account.openingBalance.currency)
         dao.insertAccount(AccountEntity(account.id, account.name, account.openingBalance.minorUnits, account.openingBalance.currency))
     }
@@ -77,21 +98,35 @@ class RoomFinanceRepository(private val database: FinanceDatabase) {
 
     suspend fun addTransaction(transaction: Transaction) = database.withTransaction {
         val current = dao.getSnapshot()
-        val ledger = FinanceLedger(current.accounts.map { it.toDomain() }, current.transactions.map { it.toDomain() } + transaction)
-        // Force checked arithmetic before persistence, not only when a later screen renders.
-        ledger.accounts.forEach { ledger.balance(it.id) }
-        ledger.totalBalance(transaction.amount.currency)
-        val cashFlow = ledger.cashFlow(transaction.amount.currency)
-        cashFlow.net
-        val existingPlanner = current.planner()
-        val candidatePlanner = GoalPlanner(ledger, existingPlanner.goals, existingPlanner.reservations)
-        // Spending may underfund existing earmarks, but their available balances must remain representable.
-        candidatePlanner.reservations.map { it.accountId }.distinct().forEach {
-            candidatePlanner.availableBalance(it)
-        }
-        dao.insertTransaction(TransactionEntity(transaction.id, transaction.type.name, transaction.accountId,
+        val row = TransactionEntity(transaction.id, transaction.type.name, transaction.accountId,
             transaction.destinationAccountId, transaction.amount.minorUnits, transaction.date.toEpochDay(),
-            transaction.categoryId, transaction.note, transaction.amount.currency))
+            transaction.categoryId, transaction.note, transaction.amount.currency)
+        validateCandidate(current.copy(transactions = current.transactions + row))
+        dao.insertTransaction(row)
+    }
+
+    /** Marks a recorded movement inactive without rewriting or deleting financial history. */
+    suspend fun voidTransaction(id: String, reason: String, date: LocalDate = LocalDate.now()) = database.withTransaction {
+        require(id.isNotBlank() && reason.isNotBlank()) { "Transaction identifier and correction reason are required" }
+        val current = dao.getSnapshot()
+        require(current.transactions.any { it.id == id }) { "Unknown transaction" }
+        require(current.corrections.none { it.originalTransactionId == id }) { "Transaction was already corrected" }
+        val correction = TransactionCorrectionEntity(UUID.randomUUID().toString(), id, null, reason.trim(), date.toEpochDay())
+        validateCandidate(current.copy(corrections = current.corrections + correction))
+        dao.insertCorrection(correction)
+    }
+
+    private fun validateCandidate(snapshot: FinanceSnapshot) {
+        val ledger = snapshot.ledger()
+        ledger.accounts.forEach { ledger.balance(it.id) }
+        ledger.accounts.map { it.openingBalance.currency }.distinct().forEach { currency ->
+            ledger.totalBalance(currency)
+            ledger.cashFlow(currency).net
+        }
+        val planner = snapshot.planner()
+        // A historical earmark may become underfunded, but its available balance must fit exact money.
+        planner.reservations.map { it.accountId }.distinct().forEach { planner.availableBalance(it) }
+        planner.goals.forEach { planner.saved(it.id) }
     }
 
     suspend fun addGoal(goal: SavingsGoal) = database.withTransaction {

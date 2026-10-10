@@ -16,6 +16,8 @@ The Android application runs locally. There is no server for the core app: a sec
 
 An account has an opening balance and a currency. Immutable income, expense, and transfer records change its computed balance. Money is stored as signed integer minor units and an ISO currency code. Currency mismatches, overflow, invalid references, and malformed transactions are rejected. A transfer debits one account and credits another; it is excluded from income, expenses, and category budgets. There is no implicit foreign-exchange conversion.
 
+Mistaken transactions are **voided, not deleted**. Room v2 adds an append-only correction record with a reason and date. The original row remains visible in activity and backups, but the effective ledger excludes it when computing balances, cash flow, and budgets. Entering a replacement is a separate, explicitly confirmed operation; there is no claim of an atomic edit. The v1→v2 migration retains the original eight finance tables and creates the correction table without destructive fallback.
+
 Savings reservations earmark existing account funds. They reduce *available* balance, not actual balance, net worth, or cash flow. A goal has a target, deadline, reserved amount, remaining amount, and a monthly contribution estimate. Budgets are limits for an inclusive date period and category; they do not create expenses. Forecasts are derived estimates, never ledger facts.
 
 ## Write flow

@@ -46,3 +46,11 @@ data class WeeklyReviewEntity(@PrimaryKey val id: String, val startEpochDay: Lon
 ], indices = [Index("reservationId")])
 data class ReservationChangeEntity(@PrimaryKey(autoGenerate = true) val sequence: Long = 0,
     val reservationId: String, val amountMinor: Long, val dateEpochDay: Long)
+
+/** Append-only correction metadata; the original ledger row is never changed or deleted. */
+@Entity(tableName = "transaction_corrections", foreignKeys = [
+    ForeignKey(entity = TransactionEntity::class, parentColumns = ["id"], childColumns = ["originalTransactionId"], onDelete = ForeignKey.RESTRICT),
+    ForeignKey(entity = TransactionEntity::class, parentColumns = ["id"], childColumns = ["replacementTransactionId"], onDelete = ForeignKey.RESTRICT),
+], indices = [Index(value = ["originalTransactionId"], unique = true), Index("replacementTransactionId")])
+data class TransactionCorrectionEntity(@PrimaryKey val id: String, val originalTransactionId: String,
+    val replacementTransactionId: String?, val reason: String, val dateEpochDay: Long)

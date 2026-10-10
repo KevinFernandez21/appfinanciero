@@ -4,7 +4,7 @@ Private, offline-first Android app for recording money, understanding spending, 
 
 ## Status
 
-Under active development. Export/restore and v1 persistence tests exist, but backups are plaintext and physical-phone/model inference tests are still pending. Do **not** use this build as the only record of real finances.
+Under active development. Export/restore and v1→v2 migration tests exist, but backups are plaintext and physical-phone/model inference tests are still pending. Do **not** use this build as the only record of real finances.
 
 ## What the app is for
 

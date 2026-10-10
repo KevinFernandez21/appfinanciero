@@ -49,6 +49,74 @@ class FinanceBackupServiceTest {
         assertEquals(json, service.exportJson())
     }
 
+    @Test fun exportsVersionTwoAndRestoresLegacyVersionOneWithoutCorrections() = runBlocking {
+        seed()
+        val exported = JSONObject(FinanceBackupService(source).exportJson())
+        assertEquals(2, exported.getInt("formatVersion"))
+        assertEquals(2, exported.getInt("databaseVersion"))
+        assertEquals(0, exported.getJSONObject("tables").getJSONArray("transaction_corrections").length())
+        val service = FinanceBackupService(target)
+        rejected { service.restoreJson(JSONObject(exported.toString()).put("databaseVersion", 1).toString(), true) }
+        rejected { service.restoreJson(JSONObject(exported.toString()).put("formatVersion", 1).put("databaseVersion", 1).toString(), true) }
+        val legacy = exported.put("formatVersion", 1).put("databaseVersion", 1).apply {
+            getJSONObject("tables").remove("transaction_corrections")
+        }.toString()
+        assertEquals(10, service.previewJson(legacy).recordCount)
+        service.restoreJson(legacy, true)
+        assertEquals(source.financeDao().getSnapshot(), target.financeDao().getSnapshot())
+    }
+
+    @Test fun voidedTransactionAndCorrectionRoundTripWithoutChangingEffectiveBalance() = runBlocking {
+        seed()
+        source.financeDao().insertCorrection(TransactionCorrectionEntity("void-expense", "expense", null, "Duplicate entry", 20_002))
+        val json = FinanceBackupService(source).exportJson()
+        val service = FinanceBackupService(target)
+        assertEquals(1, service.previewJson(json).tableCounts["transaction_corrections"])
+        service.restoreJson(json, true)
+        assertEquals(source.financeDao().getSnapshot(), target.financeDao().getSnapshot())
+        assertEquals(source.financeDao().getCorrections(), target.financeDao().getCorrections())
+        assertEquals(2, target.financeDao().getTransactions().size)
+        assertEquals(source.financeDao().getSnapshot().ledger().balance("cash"), target.financeDao().getSnapshot().ledger().balance("cash"))
+        assertEquals(json, service.exportJson())
+    }
+
+    @Test fun invalidCorrectionReferencesDuplicatesAndCyclesRejectWithoutWriting() = runBlocking {
+        seed()
+        source.financeDao().insertCorrection(TransactionCorrectionEntity("void-expense", "expense", null, "Duplicate entry", 20_002))
+        val original = FinanceBackupService(source).exportJson()
+        val service = FinanceBackupService(target)
+        val mutations: List<(JSONObject) -> Unit> = listOf(
+            { it.put("originalTransactionId", "missing") },
+            { it.put("replacementTransactionId", "missing") },
+            { it.put("replacementTransactionId", "expense") },
+            { it.put("reason", " ") },
+        )
+        mutations.forEach { mutate ->
+            val malformed = JSONObject(original).apply {
+                mutate(getJSONObject("tables").getJSONArray("transaction_corrections").getJSONObject(0))
+            }.toString()
+            rejected { service.restoreJson(malformed, true) }
+        }
+        val duplicate = JSONObject(original).apply {
+            val rows = getJSONObject("tables").getJSONArray("transaction_corrections")
+            rows.put(JSONObject(rows.getJSONObject(0).toString()).put("id", "second-void"))
+        }.toString()
+        rejected { service.restoreJson(duplicate, true) }
+        val duplicateId = JSONObject(original).apply {
+            val rows = getJSONObject("tables").getJSONArray("transaction_corrections")
+            rows.put(JSONObject(rows.getJSONObject(0).toString()).put("originalTransactionId", "transfer"))
+        }.toString()
+        rejected { service.restoreJson(duplicateId, true) }
+        val cycle = JSONObject(original).apply {
+            val rows = getJSONObject("tables").getJSONArray("transaction_corrections")
+            rows.getJSONObject(0).put("replacementTransactionId", "transfer")
+            rows.put(JSONObject().put("id", "void-transfer").put("originalTransactionId", "transfer")
+                .put("replacementTransactionId", "expense").put("reason", "Correction").put("dateEpochDay", "20003"))
+        }.toString()
+        rejected { service.restoreJson(cycle, true) }
+        assertEquals(FinanceSnapshot(), target.financeDao().getSnapshot())
+    }
+
     @Test fun releasedReservationPreservesZeroTotalAndCompleteAuditHistory() = runBlocking {
         seed()
         source.financeDao().updateReservation(source.financeDao().getReservations().single().copy(amountMinor = 0))
@@ -110,6 +178,7 @@ class FinanceBackupServiceTest {
 
     @Test fun failureDuringInsertRollsBackEveryTable() = runBlocking {
         seed()
+        source.financeDao().insertCorrection(TransactionCorrectionEntity("void-expense", "expense", null, "Duplicate entry", 20_002))
         val json = FinanceBackupService(source).exportJson()
         target.openHelper.writableDatabase.execSQL(
             "CREATE TRIGGER reject_budget BEFORE INSERT ON budgets BEGIN SELECT RAISE(ABORT, 'test failure'); END",
@@ -118,6 +187,7 @@ class FinanceBackupServiceTest {
         catch (_: android.database.sqlite.SQLiteException) { }
         assertEquals(FinanceSnapshot(), target.financeDao().getSnapshot())
         assertTrue(target.financeDao().getReservationChanges().isEmpty())
+        assertTrue(target.financeDao().getCorrections().isEmpty())
     }
 
     @Test fun malformedDuplicateAndOverflowingBackupAreRejected() = runBlocking {

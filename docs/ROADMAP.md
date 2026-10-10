@@ -12,7 +12,7 @@ This is the implementation order and acceptance contract, not a promise that unf
 
 ## 2. Everyday workflow
 
-- First-run currency/account setup; dashboard; transaction add/edit/delete with confirmation and audit-safe semantics; category management.
+- First-run currency/account setup; dashboard; transaction add and audited void/correct workflow; category management.
 - Budget creation and progress; savings goals and virtual reservations; clear calculation explanations.
 - Accessible Compose screens, empty/error/loading states, localized currency/date formatting, Spanish UI copy if explicitly chosen for the product.
 

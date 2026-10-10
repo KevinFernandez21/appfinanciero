@@ -34,6 +34,7 @@ class FinanceBackupService(private val database: FinanceDatabase) {
             snapshot.categories.forEach { dao.insertCategory(it) }
             snapshot.goals.forEach { dao.insertGoal(it) }
             snapshot.transactions.forEach { dao.insertTransaction(it) }
+            snapshot.corrections.forEach { dao.insertCorrection(it) }
             snapshot.reservations.forEach { dao.insertReservation(it) }
             backup.changes.forEach { dao.insertReservationChange(it) }
             snapshot.budgets.forEach { dao.insertBudget(it) }
@@ -52,6 +53,7 @@ private data class BackupData(val snapshot: FinanceSnapshot, val changes: List<R
         "transactions" to snapshot.transactions.size, "goals" to snapshot.goals.size,
         "goal_reservations" to snapshot.reservations.size, "reservation_changes" to changes.size,
         "budgets" to snapshot.budgets.size, "weekly_reviews" to snapshot.weeklyReviews.size,
+        "transaction_corrections" to snapshot.corrections.size,
     ))
 
     fun validate() {
@@ -63,6 +65,16 @@ private data class BackupData(val snapshot: FinanceSnapshot, val changes: List<R
         unique(s.accounts) { it.id }; unique(s.categories) { it.id }; unique(s.transactions) { it.id }
         unique(s.goals) { it.id }; unique(s.reservations) { it.id }; unique(s.budgets) { it.id }
         unique(s.weeklyReviews) { it.id }
+        unique(s.corrections) { it.id }
+        val transactionIds = s.transactions.map { it.id }.toSet()
+        val correctedIds = s.corrections.map { it.originalTransactionId }.toSet()
+        require(correctedIds.size == s.corrections.size)
+        s.corrections.forEach {
+            require(it.originalTransactionId in transactionIds && it.reason.isNotBlank())
+            require(it.replacementTransactionId == null ||
+                (it.replacementTransactionId in transactionIds && it.replacementTransactionId !in correctedIds))
+            LocalDate.ofEpochDay(it.dateEpochDay)
+        }
         require(s.categories.all { it.name.isNotBlank() })
         val categories = s.categories.map { it.id }.toSet()
         s.transactions.forEach { require(it.categoryId == null || it.categoryId in categories) }
@@ -119,10 +131,12 @@ private object BackupCodec {
             .put("goals", array(s.goals) { row("id" to it.id, "name" to it.name, "targetMinor" to it.targetMinor, "currency" to it.currency, "deadlineEpochDay" to it.deadlineEpochDay) })
             .put("goal_reservations", array(s.reservations) { row("id" to it.id, "goalId" to it.goalId, "accountId" to it.accountId, "amountMinor" to it.amountMinor, "dateEpochDay" to it.dateEpochDay) })
             .put("reservation_changes", array(data.changes) { row("sequence" to it.sequence, "reservationId" to it.reservationId, "amountMinor" to it.amountMinor, "dateEpochDay" to it.dateEpochDay) })
+            .put("transaction_corrections", array(s.corrections) { row("id" to it.id, "originalTransactionId" to it.originalTransactionId,
+                "replacementTransactionId" to it.replacementTransactionId, "reason" to it.reason, "dateEpochDay" to it.dateEpochDay) })
             .put("budgets", array(s.budgets) { row("id" to it.id, "categoryId" to it.categoryId, "limitMinor" to it.limitMinor, "currency" to it.currency, "startEpochDay" to it.startEpochDay, "endEpochDay" to it.endEpochDay) })
             .put("weekly_reviews", array(s.weeklyReviews) { row("id" to it.id, "startEpochDay" to it.startEpochDay, "endEpochDay" to it.endEpochDay,
                 "currency" to it.currency, "incomeMinor" to it.incomeMinor, "expensesMinor" to it.expensesMinor, "note" to it.note) })
-        return JSONObject().put("format", FORMAT).put("formatVersion", 1).put("databaseVersion", 1).put("tables", tables).toString().also {
+        return JSONObject().put("format", FORMAT).put("formatVersion", 2).put("databaseVersion", 2).put("tables", tables).toString().also {
             require(it.length <= FinanceBackupService.MAX_JSON_CHARACTERS) { "Backup exceeds supported size" }
         }
     }
@@ -135,9 +149,11 @@ private object BackupCodec {
             require(tokener.nextClean() == '\u0000')
             root.keysExactly("format", "formatVersion", "databaseVersion", "tables")
             require(root.string("format") == FORMAT)
-            require(root.get("formatVersion") == 1 && root.get("databaseVersion") == 1)
+            val version = root.get("formatVersion")
+            require((version == 1 || version == 2) && root.get("databaseVersion") == version)
             val tables = root.getJSONObject("tables")
-            tables.keysExactly("accounts", "categories", "transactions", "goals", "goal_reservations", "reservation_changes", "budgets", "weekly_reviews")
+            val baseTables = arrayOf("accounts", "categories", "transactions", "goals", "goal_reservations", "reservation_changes", "budgets", "weekly_reviews")
+            tables.keysExactly(*(if (version == 1) baseTables else baseTables + "transaction_corrections"))
             val snapshot = FinanceSnapshot(
                 accounts = tables.rows("accounts", "id", "name", "openingBalanceMinor", "currency") {
                     AccountEntity(it.string("id"), it.string("name"), it.long("openingBalanceMinor"), it.string("currency")) },
@@ -153,6 +169,8 @@ private object BackupCodec {
                     BudgetEntity(it.string("id"), it.string("categoryId"), it.long("limitMinor"), it.string("currency"), it.long("startEpochDay"), it.long("endEpochDay")) },
                 weeklyReviews = tables.rows("weekly_reviews", "id", "startEpochDay", "endEpochDay", "currency", "incomeMinor", "expensesMinor", "note") {
                     WeeklyReviewEntity(it.string("id"), it.long("startEpochDay"), it.long("endEpochDay"), it.string("currency"), it.long("incomeMinor"), it.long("expensesMinor"), it.string("note")) },
+                corrections = if (version == 1) emptyList() else tables.rows("transaction_corrections", "id", "originalTransactionId", "replacementTransactionId", "reason", "dateEpochDay") {
+                    TransactionCorrectionEntity(it.string("id"), it.string("originalTransactionId"), it.nullable("replacementTransactionId"), it.string("reason"), it.long("dateEpochDay")) },
             )
             val changes = tables.rows("reservation_changes", "sequence", "reservationId", "amountMinor", "dateEpochDay") {
                 ReservationChangeEntity(it.long("sequence"), it.string("reservationId"), it.long("amountMinor"), it.long("dateEpochDay")) }

@@ -40,6 +40,7 @@ fun FinanceScreen(viewModel: FinanceViewModel) {
     var page by rememberSaveable { mutableIntStateOf(0) }
     var form by rememberSaveable { mutableStateOf<String?>(null) }
     var releaseReservationId by rememberSaveable { mutableStateOf<String?>(null) }
+    var voidTransactionId by rememberSaveable { mutableStateOf<String?>(null) }
     val pages = listOf("Dashboard", "Accounts", "Activity", "Plans", "Settings", "AI")
     Scaffold { padding ->
         Column(Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
@@ -76,8 +77,11 @@ fun FinanceScreen(viewModel: FinanceViewModel) {
                             current.transactions.forEach { transaction ->
                                 val account = current.accounts.firstOrNull { it.id == transaction.sourceAccountId }?.name.orEmpty()
                                 val destination = current.accounts.firstOrNull { it.id == transaction.destinationAccountId }?.name
-                                RecordCard("${transaction.kind.lowercase().replaceFirstChar { it.uppercase() }} · ${Money(transaction.amountMinor, transaction.currency).display()}",
-                                    "$account${destination?.let { " → $it" }.orEmpty()} · ${LocalDate.ofEpochDay(transaction.dateEpochDay)}\n${transaction.note.orEmpty()}")
+                                val correction = current.corrections.firstOrNull { it.originalTransactionId == transaction.id }
+                                TransactionHistoryCard("${transaction.kind.lowercase().replaceFirstChar { it.uppercase() }} · ${Money(transaction.amountMinor, transaction.currency).display()}",
+                                    "$account${destination?.let { " → $it" }.orEmpty()} · ${LocalDate.ofEpochDay(transaction.dateEpochDay)}\n${transaction.note.orEmpty()}",
+                                    correction?.let { "${it.reason} · ${LocalDate.ofEpochDay(it.dateEpochDay)}" }, busy,
+                                    onVoid = { voidTransactionId = transaction.id })
                             }
                         }
                         3 -> {
@@ -121,6 +125,13 @@ fun FinanceScreen(viewModel: FinanceViewModel) {
                     }
                 }
             }
+        }
+    }
+    snapshot?.let { current ->
+        current.transactions.firstOrNull { transaction -> transaction.id == voidTransactionId && current.corrections.none { it.originalTransactionId == transaction.id } }?.let { transaction ->
+            VoidTransactionDialog(transaction.id, "${transaction.kind.lowercase().replaceFirstChar { it.uppercase() }} · ${Money(transaction.amountMinor, transaction.currency).display()}", busy, error,
+                onDismiss = { if (!busy) { voidTransactionId = null; viewModel.clearError() } },
+                onConfirm = { reason -> viewModel.save({ voidTransaction(transaction.id, reason) }, onSuccess = { voidTransactionId = null }) })
         }
     }
     snapshot?.let { current ->
