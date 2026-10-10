@@ -21,7 +21,7 @@ class OnDeviceSpeechInput(private val context: Context) : AutoCloseable {
 
     @MainThread
     fun start(onResult: (String) -> Unit, onError: (String) -> Unit) {
-        if (!isAvailable) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || !SpeechRecognizer.isOnDeviceRecognitionAvailable(context)) {
             onError("On-device speech recognition is not available")
             return
         }

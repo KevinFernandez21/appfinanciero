@@ -1,6 +1,7 @@
 package com.kevinfernandez.appfinanciero.ui
 
 import com.kevinfernandez.appfinanciero.domain.Money
+import com.kevinfernandez.appfinanciero.voice.VoiceTransactionDraft
 import java.time.LocalDate
 import java.util.Locale
 
@@ -15,4 +16,11 @@ object FinanceInput {
         }.orEmpty()
     }
     fun date(value: String): LocalDate = LocalDate.parse(value.trim())
+
+    fun applyVoiceDraft(values: Map<String, String>, draft: VoiceTransactionDraft): Map<String, String> =
+        values.toMutableMap().apply {
+            this["Type"] = draft.type
+            this["Amount"] = draft.amount
+            if (draft.note.isNotBlank()) this["Note"] = draft.note
+        }
 }

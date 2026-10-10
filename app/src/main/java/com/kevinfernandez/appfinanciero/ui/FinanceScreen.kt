@@ -12,6 +12,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -256,8 +257,9 @@ private fun EntryDialog(kind: String, snapshot: FinanceSnapshot, busy: Boolean, 
         else -> listOf("Goal", "Account", "Amount")
     }
     val context = LocalContext.current
-    val defaultCurrency = FinanceInput.defaultCurrency(snapshot.accounts.firstOrNull()?.currency, context.resources.configuration.locales[0])
-    var values by rememberSaveable(kind) { mutableStateOf(hashMapOf(
+    val configuration = LocalConfiguration.current
+    val defaultCurrency = FinanceInput.defaultCurrency(snapshot.accounts.firstOrNull()?.currency, configuration.locales[0])
+    var values by rememberSaveable(kind) { mutableStateOf(mapOf(
         "Currency" to defaultCurrency, "Amount" to if (kind == "Account") "0" else "", "Type" to "INCOME", "Date" to today.toString(),
         "Start" to today.withDayOfMonth(1).toString(), "End" to today.withDayOfMonth(today.lengthOfMonth()).toString(),
         "Deadline" to today.plusMonths(6).toString(), "Account" to accounts.firstOrNull()?.first.orEmpty(),
@@ -266,14 +268,16 @@ private fun EntryDialog(kind: String, snapshot: FinanceSnapshot, busy: Boolean, 
     )) }
     val speech = remember(context) { OnDeviceSpeechInput(context) }
     var speechError by remember { mutableStateOf<String?>(null) }
+    var transcript by remember { mutableStateOf<String?>(null) }
     var listening by remember { mutableStateOf(false) }
     DisposableEffect(speech) { onDispose { speech.close() } }
     fun dictate() {
         listening = true
         speechError = null
+        transcript = null
         speech.start(onResult = { draft ->
             listening = false
-            values = HashMap(values).also { it["Note"] = draft }
+            transcript = draft
         }, onError = { message -> listening = false; speechError = message })
     }
     val microphonePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -313,8 +317,18 @@ private fun EntryDialog(kind: String, snapshot: FinanceSnapshot, busy: Boolean, 
                         if (listening) { speech.stop() }
                         else if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) dictate()
                         else microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
-                    }, enabled = !busy) { Text(if (listening) "Finish dictation" else "Dictate note (on-device)") }
-                    Text("Dictation only edits the note. Review it before saving.", style = MaterialTheme.typography.bodySmall)
+                    }, enabled = !busy) { Text(if (listening) "Finish dictation" else "Dictate movement draft (on-device)") }
+                    Text("Say, for example, 'gasto 12,50 en café' or 'ingreso 12,50 por venta'. Numeric amounts only. Speech never saves a movement.",
+                        style = MaterialTheme.typography.bodySmall)
+                    transcript?.let { recognized ->
+                        val currency = snapshot.accounts.firstOrNull { it.id == values["Account"] }?.currency.orEmpty()
+                        VoiceDraftPreview(recognized, currency, !busy,
+                            onApply = { draft ->
+                                values = FinanceInput.applyVoiceDraft(values, draft)
+                                transcript = null
+                            },
+                            onDiscard = { transcript = null })
+                    }
                     speechError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 }
                 Text("Save records this entry on this device.", style = MaterialTheme.typography.bodySmall)

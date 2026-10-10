@@ -3,6 +3,7 @@ package com.kevinfernandez.appfinanciero.ui
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import java.time.LocalDate
+import com.kevinfernandez.appfinanciero.voice.VoiceTransactionDraft
 
 class FinanceInputTest {
     @Test fun parsesMoneyExactlyAndNormalizesCurrency() {
@@ -34,4 +35,13 @@ class FinanceInputTest {
     @Test fun parsesIsoDate() { assertEquals(LocalDate.of(2026, 10, 9), FinanceInput.date(" 2026-10-09 ")) }
     @Test(expected = java.time.format.DateTimeParseException::class)
     fun rejectsInvalidDate() { FinanceInput.date("2026-02-30") }
+
+    @Test fun applyingVoiceDraftOnlyChangesProposedFields() {
+        val original = mapOf("Type" to "INCOME", "Amount" to "1", "Note" to "old",
+            "Account" to "cash", "Category" to "food", "Date" to "2026-10-10")
+        val applied = FinanceInput.applyVoiceDraft(original, VoiceTransactionDraft("EXPENSE", "12.50", "café"))
+        assertEquals(original + mapOf("Type" to "EXPENSE", "Amount" to "12.50", "Note" to "café"), applied)
+        assertEquals("old", FinanceInput.applyVoiceDraft(original, VoiceTransactionDraft("EXPENSE", "5.00", ""))["Note"])
+        assertEquals("INCOME", original["Type"])
+    }
 }
