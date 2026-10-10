@@ -17,7 +17,7 @@ Under active development. User-selected exports are password-encrypted by defaul
 
 Single-device Android app: Compose UI, Kotlin domain rules, Room database, DataStore preferences. No remote backend is required for a single-user offline ledger. Optional on-device speech/LLM and an authenticated PC companion are separate adapters; neither owns financial state.
 
-See [architecture](docs/ARCHITECTURE.md), [delivery plan](docs/ROADMAP.md), [backup safety](docs/BACKUP.md), [app lock](docs/LOCK.md), [optional local AI](docs/AI.md), and the [PC/MCP boundary](docs/PC_COMPANION.md).
+See [architecture](docs/ARCHITECTURE.md), [delivery plan](docs/ROADMAP.md), [first-run usage](docs/USAGE.md), [backup safety](docs/BACKUP.md), [app lock](docs/LOCK.md), [optional local AI](docs/AI.md), and the [PC/MCP boundary](docs/PC_COMPANION.md).
 
 ## Build
 

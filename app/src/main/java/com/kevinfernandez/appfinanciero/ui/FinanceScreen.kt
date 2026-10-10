@@ -65,7 +65,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, documentPickers: DocumentPickerAc
                 val current = snapshot!!
                 Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     when (page) {
-                        0 -> Dashboard(current)
+                        0 -> Dashboard(current, !busy, onSetUp = { form = "Account" })
                         1 -> {
                             Button(onClick = { form = "Account" }, enabled = !busy) { Text("Add account") }
                             if (current.accounts.isEmpty()) Text("Start with a cash or bank account and its opening balance.")
@@ -205,9 +205,10 @@ fun FinanceScreen(viewModel: FinanceViewModel, documentPickers: DocumentPickerAc
 private fun Money.display() = "$currency ${toDecimal().toPlainString()}"
 
 @Composable
-private fun Dashboard(snapshot: FinanceSnapshot) {
+private fun Dashboard(snapshot: FinanceSnapshot, enabled: Boolean, onSetUp: () -> Unit) {
     if (snapshot.accounts.isEmpty()) {
-        Text("Welcome. Add an account to start tracking your money.")
+        Text("Welcome. Choose a name, currency and opening balance for your first account.")
+        Button(onClick = onSetUp, enabled = enabled) { Text("Set up your first account") }
         return
     }
     val ledger = snapshot.ledger()
@@ -246,14 +247,15 @@ private fun EntryDialog(kind: String, snapshot: FinanceSnapshot, busy: Boolean, 
         "Budget" -> listOf("Category", "Amount", "Currency", "Start", "End")
         else -> listOf("Goal", "Account", "Amount")
     }
+    val context = LocalContext.current
+    val defaultCurrency = FinanceInput.defaultCurrency(snapshot.accounts.firstOrNull()?.currency, context.resources.configuration.locales[0])
     var values by rememberSaveable(kind) { mutableStateOf(hashMapOf(
-        "Currency" to "USD", "Amount" to "", "Type" to "INCOME", "Date" to today.toString(),
+        "Currency" to defaultCurrency, "Amount" to if (kind == "Account") "0" else "", "Type" to "INCOME", "Date" to today.toString(),
         "Start" to today.withDayOfMonth(1).toString(), "End" to today.withDayOfMonth(today.lengthOfMonth()).toString(),
         "Deadline" to today.plusMonths(6).toString(), "Account" to accounts.firstOrNull()?.first.orEmpty(),
         "Destination" to accounts.getOrNull(1)?.first.orEmpty(), "Category" to categories.firstOrNull()?.first.orEmpty(),
         "Goal" to goals.firstOrNull()?.first.orEmpty(),
     )) }
-    val context = LocalContext.current
     val speech = remember(context) { OnDeviceSpeechInput(context) }
     var speechError by remember { mutableStateOf<String?>(null) }
     var listening by remember { mutableStateOf(false) }
@@ -289,9 +291,13 @@ private fun EntryDialog(kind: String, snapshot: FinanceSnapshot, busy: Boolean, 
                         fun update(value: String) { values = HashMap(values).also { it[field] = value } }
                         if (options != null) ChoiceField(field, values[field].orEmpty(), options, !busy, ::update)
                         else OutlinedTextField(value = values[field].orEmpty(), onValueChange = ::update,
-                            enabled = !busy, label = { Text(if (field == "Amount") "Amount (e.g. 12.34)" else field) },
+                            enabled = !busy, label = { Text(field) },
                             singleLine = field != "Note", modifier = Modifier.fillMaxWidth(),
-                            supportingText = if (field in listOf("Date", "Deadline", "Start", "End")) { { Text("YYYY-MM-DD") } } else null)
+                            supportingText = when (field) {
+                                "Date", "Deadline", "Start", "End" -> { { Text("YYYY-MM-DD") } }
+                                "Currency" -> { { Text("ISO 4217 code, e.g. COP, USD or JPY") } }
+                                else -> null
+                            })
                     }
                 }
                 if (kind == "Transaction" && speech.isAvailable) {
