@@ -28,6 +28,12 @@ Run encryption/decryption off the UI thread. Bounds are 10 Mi JSON characters, 4
 
 This protects exported files, not the live Room database or an unlocked/compromised device. A copied encrypted file permits offline password guessing; the work factor slows guessing but cannot compensate for a weak passphrase. File length and the cryptographic format header are public.
 
+## Platform backup policy
+
+The app opts out of Android automatic backup with `android:allowBackup="false"`. It also excludes all app storage domains from cloud backup and device-to-device transfer in `data_extraction_rules.xml`, with `full_backup_rules.xml` for Android 11 and lower. This is intentional: Room records and lock preferences are not encrypted at rest, and some Android 12+ manufacturers may still transfer app data when only `allowBackup="false"` is set. The platform rules are separate from the user-selected, password-encrypted SAF export.
+
+Before changing phones or reinstalling, create an encrypted `.afbk` export and keep its password separately. An automatic device transfer is **not** a recovery plan for this app. Instrumented tests check the packaged exclusion rules; a physical device-to-device transfer has not been verified on the target phone. See [Android's Auto Backup guidance](https://developer.android.com/identity/data/autobackup) for platform behavior.
+
 ## Safety contract
 
 - `FinanceBackupService` JSON and legacy JSON files are **NOT ENCRYPTED**; wrap exports with `EncryptedBackupCodec` before writing user files. Legacy JSON contains sensitive financial amounts and notes. Store it only in a private location; do not attach it to bug reports or commit it. Neither service logs, uploads, or schedules exports.
