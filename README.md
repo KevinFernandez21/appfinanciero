@@ -4,7 +4,7 @@ Private, offline-first Android app for recording money, understanding spending, 
 
 ## Status
 
-Under active development. User-selected exports are password-encrypted by default; legacy plaintext JSON can still be imported with a warning. Export/restore and v1→v2 migration tests exist, but app lock, physical-phone testing, and local-model inference testing are still pending. Do **not** use this build as the only record of real finances.
+Under active development. User-selected exports are password-encrypted by default; legacy plaintext JSON can still be imported with a warning. A device-authenticated app lock is on by default, but it is a UI gate, not database encryption. Export/restore and v1→v2 migration tests exist; physical-phone authentication and local-model inference tests are still pending. Do **not** use this build as the only record of real finances.
 
 ## What the app is for
 
@@ -17,7 +17,7 @@ Under active development. User-selected exports are password-encrypted by defaul
 
 Single-device Android app: Compose UI, Kotlin domain rules, Room database, DataStore preferences. No remote backend is required for a single-user offline ledger. Optional on-device speech/LLM and an authenticated PC companion are separate adapters; neither owns financial state.
 
-See [architecture](docs/ARCHITECTURE.md), [delivery plan](docs/ROADMAP.md), [backup safety](docs/BACKUP.md), [optional local AI](docs/AI.md), and the [PC/MCP boundary](docs/PC_COMPANION.md).
+See [architecture](docs/ARCHITECTURE.md), [delivery plan](docs/ROADMAP.md), [backup safety](docs/BACKUP.md), [app lock](docs/LOCK.md), [optional local AI](docs/AI.md), and the [PC/MCP boundary](docs/PC_COMPANION.md).
 
 ## Build
 

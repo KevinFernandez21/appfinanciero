@@ -1,7 +1,5 @@
 package com.kevinfernandez.appfinanciero.ui
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -14,7 +12,7 @@ import com.kevinfernandez.appfinanciero.ai.AiReply
 import com.kevinfernandez.appfinanciero.voice.OfflineSpeaker
 
 @Composable
-internal fun LocalAiScreen(viewModel: FinanceViewModel) {
+internal fun LocalAiScreen(viewModel: FinanceViewModel, pickers: DocumentPickerActions) {
     val installed by viewModel.modelInstalled.collectAsStateWithLifecycle()
     val reply by viewModel.aiReply.collectAsStateWithLifecycle()
     val busy by viewModel.busy.collectAsStateWithLifecycle()
@@ -25,15 +23,11 @@ internal fun LocalAiScreen(viewModel: FinanceViewModel) {
     // Typed questions stay only in memory, not the Activity's persisted state bundle.
     var question by remember { mutableStateOf("") }
     var removeConfirmation by rememberSaveable { mutableStateOf(false) }
-    val resolver = LocalContext.current.applicationContext.contentResolver
-    val importDocument = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let { viewModel.importModel(resolver, it) }
-    }
     Text("Optional local AI", style = MaterialTheme.typography.titleLarge)
     Text("The ledger and computed insights work without a model. AI has no ledger access and cannot record movements.")
     Text(if (installed) "Model imported (compatibility checked on first request)." else "No model installed.")
     Text("Import a trusted, CPU-compatible .litertlm model (maximum 1 GiB). Models are not bundled or downloaded automatically.")
-    Button(onClick = { importDocument.launch(arrayOf("*/*")) }, enabled = !busy) { Text(if (installed) "Replace local model" else "Import local model") }
+    Button(onClick = { pickers.openModel() }, enabled = !busy) { Text(if (installed) "Replace local model" else "Import local model") }
     if (installed) OutlinedButton(onClick = { removeConfirmation = true }, enabled = !busy) { Text("Remove local model") }
     Text("Only what you type below is sent to the on-device model. Do not include private financial notes unnecessarily.")
     OutlinedTextField(question, onValueChange = { question = it }, label = { Text("General budgeting question") },

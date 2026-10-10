@@ -1,9 +1,9 @@
 package com.kevinfernandez.appfinanciero.ui
 
 import android.Manifest
-import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import android.content.pm.PackageManager
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -24,7 +24,7 @@ import java.time.YearMonth
 import java.util.UUID
 
 @Composable
-fun FinanceScreen(viewModel: FinanceViewModel) {
+fun FinanceScreen(viewModel: FinanceViewModel, documentPickers: DocumentPickerActions? = null, lockSettings: @Composable () -> Unit = {}) {
     val snapshot by viewModel.snapshot.collectAsStateWithLifecycle()
     val error by viewModel.error.collectAsStateWithLifecycle()
     val busy by viewModel.busy.collectAsStateWithLifecycle()
@@ -35,18 +35,12 @@ fun FinanceScreen(viewModel: FinanceViewModel) {
     val legacyRestore by viewModel.legacyRestore.collectAsStateWithLifecycle()
     // Dialog visibility may reset on recreation; passwords are ordinary remember state only.
     var exportPasswordDialog by remember { mutableStateOf(false) }
-    val resolver = LocalContext.current.applicationContext.contentResolver
-    val exportDocument = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
-        if (uri != null) viewModel.exportPreparedBackup(resolver, uri) else viewModel.cancelPreparedExport()
-    }
-    val openDocument = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let { viewModel.previewBackup(resolver, it) }
-    }
+    val pickers = documentPickers ?: rememberFinanceDocumentPickers(viewModel)
     LaunchedEffect(exportReady) {
         if (exportReady) {
             exportPasswordDialog = false
             viewModel.consumeExportReady()
-            exportDocument.launch("appahorro-backup-${LocalDate.now()}.afbk")
+            pickers.exportBackup("appahorro-backup-${LocalDate.now()}.afbk")
         }
     }
     var page by rememberSaveable { mutableIntStateOf(0) }
@@ -120,6 +114,7 @@ fun FinanceScreen(viewModel: FinanceViewModel) {
                             }
                         }
                         4 -> {
+                            lockSettings()
                             Text("Backup & restore", style = MaterialTheme.typography.titleLarge)
                             RecordCard("Password-encrypted backups by default", "New exports use encrypted .afbk files. Keep a strong password safe: it is not saved, and the app cannot recover a forgotten password.")
                             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
@@ -130,11 +125,11 @@ fun FinanceScreen(viewModel: FinanceViewModel) {
                             }
                             Text("Restore is supported only into an entirely empty database. Existing history is never replaced or merged.")
                             Button(onClick = { viewModel.clearError(); exportPasswordDialog = true }, enabled = !busy && restorePreview == null) { Text("Export encrypted backup") }
-                            OutlinedButton(onClick = { openDocument.launch(arrayOf("*/*")) }, enabled = !busy && restorePreview == null) { Text("Preview backup restore") }
+                            OutlinedButton(onClick = { pickers.openBackup() }, enabled = !busy && restorePreview == null) { Text("Preview backup restore") }
                             if (busy) CircularProgressIndicator()
                             backupNotice?.let { Text(it) }
                         }
-                        5 -> LocalAiScreen(viewModel)
+                        5 -> LocalAiScreen(viewModel, pickers)
                     }
                 }
             }

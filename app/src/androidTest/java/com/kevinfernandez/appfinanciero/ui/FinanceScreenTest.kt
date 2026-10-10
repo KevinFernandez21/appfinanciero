@@ -6,11 +6,21 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import com.kevinfernandez.appfinanciero.MainActivity
+import android.content.Context
+import androidx.test.core.app.ApplicationProvider
+import org.junit.rules.ExternalResource
+import org.junit.rules.RuleChain
 import org.junit.Rule
 import org.junit.Test
 
 class FinanceScreenTest {
-    @get:Rule val compose = createAndroidComposeRule<MainActivity>()
+    val compose = createAndroidComposeRule<MainActivity>()
+    // These tests exercise finance UI, not the authentication boundary.
+    @get:Rule val rules: RuleChain = RuleChain.outerRule(object : ExternalResource() {
+        private val preferences get() = ApplicationProvider.getApplicationContext<Context>().getSharedPreferences("app_lock", 0)
+        override fun before() { preferences.edit().putBoolean("enabled", false).commit() }
+        override fun after() { preferences.edit().clear().commit() }
+    }).around(compose)
 
     @Test fun accountDraftCanBeCancelledWithoutSaving() {
         compose.onNodeWithText("Accounts").performClick()
@@ -37,8 +47,8 @@ class FinanceScreenTest {
         compose.waitUntil(10_000) {
             compose.onAllNodes(androidx.compose.ui.test.hasText("LEGACY JSON BACKUPS ARE NOT ENCRYPTED")).fetchSemanticsNodes().isNotEmpty()
         }
-        compose.onNodeWithText("Password-encrypted backups by default").assertIsDisplayed()
-        compose.onNodeWithText("LEGACY JSON BACKUPS ARE NOT ENCRYPTED").assertIsDisplayed()
+        compose.onNodeWithText("Password-encrypted backups by default").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("LEGACY JSON BACKUPS ARE NOT ENCRYPTED").performScrollTo().assertIsDisplayed()
     }
 
     @Test fun optionalAiKeepsQuestionSeparateFromLedger() {
