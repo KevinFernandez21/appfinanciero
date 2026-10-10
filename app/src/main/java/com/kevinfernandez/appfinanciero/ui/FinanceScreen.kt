@@ -30,12 +30,24 @@ fun FinanceScreen(viewModel: FinanceViewModel) {
     val busy by viewModel.busy.collectAsStateWithLifecycle()
     val restorePreview by viewModel.restorePreview.collectAsStateWithLifecycle()
     val backupNotice by viewModel.backupNotice.collectAsStateWithLifecycle()
+    val exportReady by viewModel.exportReady.collectAsStateWithLifecycle()
+    val encryptedPasswordRequired by viewModel.encryptedPasswordRequired.collectAsStateWithLifecycle()
+    val legacyRestore by viewModel.legacyRestore.collectAsStateWithLifecycle()
+    // Dialog visibility may reset on recreation; passwords are ordinary remember state only.
+    var exportPasswordDialog by remember { mutableStateOf(false) }
     val resolver = LocalContext.current.applicationContext.contentResolver
-    val exportDocument = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
-        uri?.let { viewModel.exportBackup(resolver, it) }
+    val exportDocument = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        if (uri != null) viewModel.exportPreparedBackup(resolver, uri) else viewModel.cancelPreparedExport()
     }
     val openDocument = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let { viewModel.previewBackup(resolver, it) }
+    }
+    LaunchedEffect(exportReady) {
+        if (exportReady) {
+            exportPasswordDialog = false
+            viewModel.consumeExportReady()
+            exportDocument.launch("appahorro-backup-${LocalDate.now()}.afbk")
+        }
     }
     var page by rememberSaveable { mutableIntStateOf(0) }
     var form by rememberSaveable { mutableStateOf<String?>(null) }
@@ -109,15 +121,16 @@ fun FinanceScreen(viewModel: FinanceViewModel) {
                         }
                         4 -> {
                             Text("Backup & restore", style = MaterialTheme.typography.titleLarge)
+                            RecordCard("Password-encrypted backups by default", "New exports use encrypted .afbk files. Keep a strong password safe: it is not saved, and the app cannot recover a forgotten password.")
                             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
                                 Column(Modifier.padding(16.dp)) {
-                                    Text("WARNING: BACKUP FILES ARE NOT ENCRYPTED", style = MaterialTheme.typography.titleMedium)
-                                    Text("The JSON contains your accounts, amounts, notes and financial history. Anyone with this file can read it. Choose a secure location and do not share it publicly.")
+                                    Text("LEGACY JSON BACKUPS ARE NOT ENCRYPTED", style = MaterialTheme.typography.titleMedium)
+                                    Text("Legacy JSON import is still supported. Anyone with those old files can read your accounts, amounts and notes. Re-export securely as .afbk; old plaintext copies are not deleted automatically.")
                                 }
                             }
                             Text("Restore is supported only into an entirely empty database. Existing history is never replaced or merged.")
-                            Button(onClick = { exportDocument.launch("appahorro-backup-${LocalDate.now()}.json") }, enabled = !busy && restorePreview == null) { Text("Export JSON backup") }
-                            OutlinedButton(onClick = { openDocument.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }, enabled = !busy && restorePreview == null) { Text("Preview restore from JSON") }
+                            Button(onClick = { viewModel.clearError(); exportPasswordDialog = true }, enabled = !busy && restorePreview == null) { Text("Export encrypted backup") }
+                            OutlinedButton(onClick = { openDocument.launch(arrayOf("*/*")) }, enabled = !busy && restorePreview == null) { Text("Preview backup restore") }
                             if (busy) CircularProgressIndicator()
                             backupNotice?.let { Text(it) }
                         }
@@ -127,6 +140,11 @@ fun FinanceScreen(viewModel: FinanceViewModel) {
             }
         }
     }
+    if (exportPasswordDialog) BackupPasswordDialog(true, busy, error,
+        onDismiss = { if (!busy) { exportPasswordDialog = false; viewModel.clearError() } },
+        onPassword = viewModel::prepareEncryptedExport)
+    if (encryptedPasswordRequired) BackupPasswordDialog(false, busy, error,
+        onDismiss = viewModel::cancelRestore, onPassword = viewModel::decryptBackup)
     snapshot?.let { current ->
         current.transactions.firstOrNull { transaction -> transaction.id == voidTransactionId && current.corrections.none { it.originalTransactionId == transaction.id } }?.let { transaction ->
             VoidTransactionDialog(transaction.id, "${transaction.kind.lowercase().replaceFirstChar { it.uppercase() }} · ${Money(transaction.amountMinor, transaction.currency).display()}", busy, error,
@@ -148,7 +166,8 @@ fun FinanceScreen(viewModel: FinanceViewModel) {
             title = { Text("Confirm restore") },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("This backup is NOT encrypted.", color = MaterialTheme.colorScheme.error)
+                    if (legacyRestore) Text("WARNING: This legacy JSON backup is NOT encrypted.", color = MaterialTheme.colorScheme.error)
+                    else Text("Encrypted backup authenticated and validated. Its password is not retained.")
                     Text("${preview.recordCount} records were validated. Import only if you trust this file. Your database must be empty.")
                     preview.tableCounts.forEach { (table, count) -> Text("${table.replace('_', ' ')}: $count") }
                     error?.let { Text(it, color = MaterialTheme.colorScheme.error) }

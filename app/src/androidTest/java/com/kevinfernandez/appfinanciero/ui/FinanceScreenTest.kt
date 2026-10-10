@@ -32,12 +32,13 @@ class FinanceScreenTest {
         compose.onNodeWithText("Add account").assertIsDisplayed()
     }
 
-    @Test fun backupSettingsWarnAboutUnencryptedFiles() {
+    @Test fun backupSettingsDefaultToEncryptionAndWarnAboutLegacyFiles() {
         compose.onNodeWithText("Settings").performScrollTo().performClick()
         compose.waitUntil(10_000) {
-            compose.onAllNodes(androidx.compose.ui.test.hasText("WARNING: BACKUP FILES ARE NOT ENCRYPTED")).fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodes(androidx.compose.ui.test.hasText("LEGACY JSON BACKUPS ARE NOT ENCRYPTED")).fetchSemanticsNodes().isNotEmpty()
         }
-        compose.onNodeWithText("WARNING: BACKUP FILES ARE NOT ENCRYPTED").assertIsDisplayed()
+        compose.onNodeWithText("Password-encrypted backups by default").assertIsDisplayed()
+        compose.onNodeWithText("LEGACY JSON BACKUPS ARE NOT ENCRYPTED").assertIsDisplayed()
     }
 
     @Test fun optionalAiKeepsQuestionSeparateFromLedger() {

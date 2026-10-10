@@ -12,6 +12,7 @@ import com.kevinfernandez.appfinanciero.data.FinanceSnapshot
 import com.kevinfernandez.appfinanciero.data.FinanceDatabase
 import com.kevinfernandez.appfinanciero.backup.FinanceBackupService
 import com.kevinfernandez.appfinanciero.backup.BackupPreview
+import com.kevinfernandez.appfinanciero.backup.EncryptedBackupCodec
 import com.kevinfernandez.appfinanciero.ai.LocalLlmService
 import com.kevinfernandez.appfinanciero.ai.AiReply
 import kotlinx.coroutines.CancellationException
@@ -21,6 +22,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CoroutineStart
 
 class FinanceViewModel(private val database: FinanceDatabase, context: Context) : ViewModel() {
     private val repository = RoomFinanceRepository(database)
@@ -31,7 +33,15 @@ class FinanceViewModel(private val database: FinanceDatabase, context: Context) 
     private val mutableBusy = MutableStateFlow(false)
     val busy: StateFlow<Boolean> = mutableBusy
     private val backup = FinanceBackupService(database)
-    private var pendingRestoreJson: String? = null
+    private var pendingRestoreJson: CharArray? = null
+    private var pendingEncryptedImport: ByteArray? = null
+    private var pendingEncryptedExport: ByteArray? = null
+    private val mutableExportReady = MutableStateFlow(false)
+    val exportReady: StateFlow<Boolean> = mutableExportReady
+    private val mutableEncryptedPasswordRequired = MutableStateFlow(false)
+    val encryptedPasswordRequired: StateFlow<Boolean> = mutableEncryptedPasswordRequired
+    private val mutableLegacyRestore = MutableStateFlow(false)
+    val legacyRestore: StateFlow<Boolean> = mutableLegacyRestore
     private val mutableRestorePreview = MutableStateFlow<BackupPreview?>(null)
     val restorePreview: StateFlow<BackupPreview?> = mutableRestorePreview
     private val mutableBackupNotice = MutableStateFlow<String?>(null)
@@ -93,54 +103,110 @@ class FinanceViewModel(private val database: FinanceDatabase, context: Context) 
         }
     }
 
-    fun exportBackup(resolver: ContentResolver, uri: Uri) = runBackup {
-        withContext(Dispatchers.IO) {
-            val json = backup.exportJson()
-            requireNotNull(resolver.openOutputStream(uri, "wt")) { "Could not open the selected document" }
-                .bufferedWriter(Charsets.UTF_8).use { it.write(json) }
-        }
-        mutableBackupNotice.value = "Backup exported. This file is NOT encrypted; store it securely."
+    fun prepareEncryptedExport(password: CharArray) = runBackup(cleanup = { password.fill('\u0000') }) {
+        cancelPreparedExport()
+        pendingEncryptedExport = withContext(Dispatchers.IO) { EncryptedBackupCodec.encrypt(backup.exportJson(), password) }
+        mutableExportReady.value = true
+    }
+
+    fun consumeExportReady() { mutableExportReady.value = false }
+
+    fun cancelPreparedExport() {
+        pendingEncryptedExport?.fill(0)
+        pendingEncryptedExport = null
+        mutableExportReady.value = false
+    }
+
+    fun exportPreparedBackup(resolver: ContentResolver, uri: Uri) = runBackup {
+        val bytes = requireNotNull(pendingEncryptedExport) { "Backup preparation was lost. Start a new encrypted export; no password was saved." }
+        pendingEncryptedExport = null
+        mutableExportReady.value = false
+        try {
+            withContext(Dispatchers.IO) {
+                requireNotNull(resolver.openOutputStream(uri, "wt")) { "Could not open the selected document" }.use { it.write(bytes) }
+            }
+            mutableBackupNotice.value = "Encrypted backup exported. Keep its password safe; the app cannot recover it."
+        } finally { bytes.fill(0) }
     }
 
     fun previewBackup(resolver: ContentResolver, uri: Uri) = runBackup {
-        val (json, preview) = withContext(Dispatchers.IO) {
-            val text = requireNotNull(resolver.openInputStream(uri)) { "Could not open the selected document" }
-                .bufferedReader(Charsets.UTF_8).use { BackupDocumentText.read(it, FinanceBackupService.MAX_JSON_CHARACTERS) }
-            text to backup.previewJson(text)
+        clearRestoreData()
+        val bytes = withContext(Dispatchers.IO) {
+            requireNotNull(resolver.openInputStream(uri)) { "Could not open the selected document" }
+                .use { BackupDocumentBytes.read(it, EncryptedBackupCodec.MAX_ENVELOPE_BYTES) }
         }
-        pendingRestoreJson = json
+        if (EncryptedBackupCodec.isEncrypted(bytes)) {
+            pendingEncryptedImport = bytes
+            mutableEncryptedPasswordRequired.value = true
+        } else {
+            try {
+                val (characters, preview) = withContext(Dispatchers.IO) {
+                    val json = BackupDocumentBytes.decodeUtf8(bytes)
+                    val validated = backup.previewJson(json)
+                    json.toCharArray() to validated
+                }
+                pendingRestoreJson = characters
+                mutableRestorePreview.value = preview
+                mutableLegacyRestore.value = true
+            } finally { bytes.fill(0) }
+        }
+    }
+
+    fun decryptBackup(password: CharArray) = runBackup(cleanup = { password.fill('\u0000') }) {
+        val envelope = requireNotNull(pendingEncryptedImport) { "Select an encrypted backup first" }
+        val (characters, preview) = withContext(Dispatchers.IO) {
+            val json = EncryptedBackupCodec.decrypt(envelope, password)
+            val validated = backup.previewJson(json)
+            json.toCharArray() to validated
+        }
+        pendingRestoreJson = characters
         mutableRestorePreview.value = preview
+        mutableLegacyRestore.value = false
+        pendingEncryptedImport?.fill(0)
+        pendingEncryptedImport = null
+        mutableEncryptedPasswordRequired.value = false
+    }
+
+    private fun clearRestoreData() {
+        pendingRestoreJson?.fill('\u0000')
+        pendingRestoreJson = null
+        pendingEncryptedImport?.fill(0)
+        pendingEncryptedImport = null
+        mutableRestorePreview.value = null
+        mutableEncryptedPasswordRequired.value = false
+        mutableLegacyRestore.value = false
     }
 
     fun cancelRestore() {
         if (!mutableBusy.value) {
-            pendingRestoreJson = null
-            mutableRestorePreview.value = null
+            clearRestoreData()
+            mutableError.value = null
         }
     }
 
     fun confirmRestore() {
         val json = pendingRestoreJson ?: return
         runBackup {
-            withContext(Dispatchers.IO) { backup.restoreJson(json, confirmed = true) }
-            pendingRestoreJson = null
-            mutableRestorePreview.value = null
+            withContext(Dispatchers.IO) { backup.restoreJson(String(json), confirmed = true) }
+            clearRestoreData()
             mutableBackupNotice.value = "Backup restored successfully."
         }
     }
 
-    private fun runBackup(operation: suspend () -> Unit) {
-        if (mutableBusy.value) return
+    private fun runBackup(cleanup: () -> Unit = {}, operation: suspend () -> Unit) {
+        if (mutableBusy.value) { cleanup(); return }
         mutableBusy.value = true
         mutableError.value = null
         mutableBackupNotice.value = null
-        viewModelScope.launch {
+        val job = viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
             try { operation() }
             catch (e: CancellationException) { throw e }
             catch (e: IllegalArgumentException) { mutableError.value = e.message ?: "Invalid or unsupported backup." }
             catch (_: Exception) { mutableError.value = "Could not access or process the backup document. Please try again." }
-            finally { mutableBusy.value = false }
+            finally { cleanup(); mutableBusy.value = false }
         }
+        // Also clear arrays if scope cancellation prevents the coroutine from entering its body.
+        job.invokeOnCompletion { cleanup() }
     }
 
     fun save(operation: suspend RoomFinanceRepository.() -> Unit, onSuccess: () -> Unit) {
@@ -159,7 +225,7 @@ class FinanceViewModel(private val database: FinanceDatabase, context: Context) 
         }
     }
 
-    override fun onCleared() { localAi.close(); database.close() }
+    override fun onCleared() { cancelPreparedExport(); clearRestoreData(); localAi.close(); database.close() }
 
     class Factory(context: Context) : ViewModelProvider.Factory {
         private val applicationContext = context.applicationContext
