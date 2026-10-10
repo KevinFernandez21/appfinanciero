@@ -3,6 +3,15 @@ package com.kevinfernandez.appfinanciero.domain
 import java.math.BigInteger
 import java.time.LocalDate
 
+private val minimumLong = BigInteger.valueOf(Long.MIN_VALUE)
+private val maximumLong = BigInteger.valueOf(Long.MAX_VALUE)
+
+/** Android's BigInteger.longValueExact requires API 31; keep the same check on minSdk 26. */
+private fun BigInteger.toExactLong(): Long {
+    if (this < minimumLong || this > maximumLong) throw ArithmeticException("Financial total exceeds Long range")
+    return toLong()
+}
+
 enum class TransactionType { INCOME, EXPENSE, TRANSFER }
 
 data class Transaction(
@@ -85,13 +94,13 @@ class FinanceLedger(accounts: List<Account>, transactions: List<Transaction>) {
             }
             if (it.destinationAccountId == accountId) units += amount
         }
-        return opening.copy(minorUnits = units.longValueExact())
+        return opening.copy(minorUnits = units.toExactLong())
     }
     fun totalBalance(currency: String): Money {
         val zero = Money.zero(currency)
         val units = accounts.filter { it.openingBalance.currency == currency }
             .fold(BigInteger.ZERO) { sum, account -> sum + BigInteger.valueOf(balance(account.id).minorUnits) }
-        return zero.copy(minorUnits = units.longValueExact())
+        return zero.copy(minorUnits = units.toExactLong())
     }
     fun cashFlow(currency: String, startDate: LocalDate = LocalDate.MIN, endDate: LocalDate = LocalDate.MAX): CashFlow {
         require(!endDate.isBefore(startDate)) { "Invalid cash flow period" }

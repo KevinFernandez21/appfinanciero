@@ -21,6 +21,7 @@ Build a private, offline-first Android application that helps one person underst
 - Do not log financial notes, amounts, audio, or model prompts in production.
 - Require explicit user confirmation before a voice or LLM-generated draft changes the ledger.
 - Document and verify build/test commands. Do not claim an emulator or device test that did not run.
+- Run Android lint for platform, manifest, and resource changes; emulator tests on one API level do not prove minSdk compatibility.
 - Keep code, identifiers, comments, and documentation in English unless the user requests otherwise for an artifact.
 
 ## Skills

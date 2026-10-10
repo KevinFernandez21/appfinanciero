@@ -42,6 +42,7 @@ dependencies {
     androidTestImplementation(composeBom)
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation("androidx.biometric:biometric:1.1.0")
+    implementation("androidx.fragment:fragment:1.3.0")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
